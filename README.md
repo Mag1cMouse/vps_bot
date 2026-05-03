@@ -65,7 +65,7 @@ python3 bot.py --profile dev
 cp .env.prod.example .env.prod
 ```
 
-В `.env.prod` укажи боевой токен:
+В `.env.prod` укажи боевой токен и настройки логов. Если хочешь отправлять команды напрямую в сервер, добавь RCON-параметры.
 
 ```bash
 BOT_PROFILE=prod
@@ -74,6 +74,9 @@ ADMIN_IDS=123456789
 MC_CONTROL_MODE=systemd
 MC_SERVICE=minecraft.service
 MC_LATEST_LOG=/root/server/logs/latest.log
+MC_RCON_HOST=127.0.0.1
+MC_RCON_PORT=25575
+MC_RCON_PASSWORD=ваш_пароль
 ```
 
 Пример systemd unit лежит в `deploy/systemd/vps-bot.service.example`.
@@ -123,7 +126,10 @@ gh secret set VPS_BOT_SERVICE
 gh secret set VPS_SSH_KEY < ~/.ssh/vps_bot_deploy
 ```
 
-На VPS репозиторий должен уже лежать в `VPS_PROJECT_DIR`, а у пользователя должен работать `git pull origin master`.
+Деплой `master` работает через SSH + `rsync`: GitHub Actions отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python и перезапускает systemd-сервис.
+
+Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__` и виртуальные окружения при деплое не отправляются и не затираются. Боевой `.env.prod` должен лежать на VPS внутри `VPS_PROJECT_DIR`.
+
 Для перезапуска сервиса GitHub Actions вызывает:
 
 ```bash

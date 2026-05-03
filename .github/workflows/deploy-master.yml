@@ -81,15 +81,31 @@ jobs:
           chmod 600 ~/.ssh/vps_bot_deploy_key
           ssh-keyscan -p "${VPS_PORT:-22}" "${VPS_HOST}" >> ~/.ssh/known_hosts
 
+      - name: Install rsync
+        if: steps.deploy_secrets.outputs.configured == 'true'
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
       - name: Deploy on VPS
         if: steps.deploy_secrets.outputs.configured == 'true'
         run: |
           ssh -i ~/.ssh/vps_bot_deploy_key -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" \
+            "mkdir -p \"${VPS_PROJECT_DIR}\""
+
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/vps_bot_deploy_key -p ${VPS_PORT:-22}" \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".env" \
+            --exclude ".env.*" \
+            --exclude "__pycache__/" \
+            --exclude "*.pyc" \
+            --exclude ".venv/" \
+            --exclude "venv/" \
+            ./ "${VPS_USER}@${VPS_HOST}:${VPS_PROJECT_DIR}/"
+
+          ssh -i ~/.ssh/vps_bot_deploy_key -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" \
             "set -euo pipefail
              cd \"${VPS_PROJECT_DIR}\"
-             git fetch origin master
-             git checkout master
-             git pull --ff-only origin master
              python3 -m compileall bot.py src
              sudo systemctl restart \"${VPS_BOT_SERVICE}\"
              sudo systemctl status \"${VPS_BOT_SERVICE}\" --no-pager -l"

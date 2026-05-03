@@ -1,5 +1,6 @@
 BTN_STATUS = "Статус"
 BTN_RESOURCES = "Ресурсы"
+BTN_PLAYERS = "Игроки"
 BTN_START = "Запустить"
 BTN_STOP = "Остановить"
 BTN_RESTART = "Перезапустить"
@@ -11,9 +12,9 @@ def main_menu():
     return {
         "keyboard": [
             [BTN_STATUS, BTN_RESOURCES],
+            [BTN_PLAYERS, BTN_LOGS],
             [BTN_START, BTN_STOP],
-            [BTN_RESTART, BTN_LOGS],
-            [BTN_HELP],
+            [BTN_RESTART, BTN_HELP],
         ],
         "resize_keyboard": True,
         "is_persistent": True,
@@ -39,5 +40,8 @@ def default_commands():
         {"command": "start", "description": "Открыть кнопки"},
         {"command": "status", "description": "Статус Minecraft"},
         {"command": "resources", "description": "Ресурсы VPS"},
+        {"command": "players", "description": "Список игроков"},
+        {"command": "kill", "description": "Убить игрока"},
+        {"command": "kick", "description": "Кикнуть игрока"},
         {"command": "logs", "description": "Отправить latest.log"},
     ]
