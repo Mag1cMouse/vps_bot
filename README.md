@@ -123,7 +123,10 @@ gh secret set VPS_BOT_SERVICE
 gh secret set VPS_SSH_KEY < ~/.ssh/vps_bot_deploy
 ```
 
-На VPS репозиторий должен уже лежать в `VPS_PROJECT_DIR`, а у пользователя должен работать `git pull origin master`.
+Деплой `master` работает через SSH + `rsync`: GitHub Actions отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python и перезапускает systemd-сервис.
+
+Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__` и виртуальные окружения при деплое не отправляются и не затираются. Боевой `.env.prod` должен лежать на VPS внутри `VPS_PROJECT_DIR`.
+
 Для перезапуска сервиса GitHub Actions вызывает:
 
 ```bash
