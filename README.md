@@ -65,7 +65,7 @@ python3 bot.py --profile dev
 cp .env.prod.example .env.prod
 ```
 
-В `.env.prod` укажи боевой токен:
+В `.env.prod` укажи боевой токен и настройки логов. Если хочешь отправлять команды напрямую в сервер, добавь RCON-параметры.
 
 ```bash
 BOT_PROFILE=prod
@@ -74,6 +74,9 @@ ADMIN_IDS=123456789
 MC_CONTROL_MODE=systemd
 MC_SERVICE=minecraft.service
 MC_LATEST_LOG=/root/server/logs/latest.log
+MC_RCON_HOST=127.0.0.1
+MC_RCON_PORT=25575
+MC_RCON_PASSWORD=ваш_пароль
 ```
 
 Пример systemd unit лежит в `deploy/systemd/vps-bot.service.example`.

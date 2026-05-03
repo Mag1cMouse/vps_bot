@@ -2,6 +2,7 @@ from vps_bot.services.resources import resources_text
 from vps_bot.telegram.keyboards import (
     BTN_HELP,
     BTN_LOGS,
+    BTN_PLAYERS,
     BTN_RESOURCES,
     BTN_RESTART,
     BTN_START,
@@ -53,6 +54,18 @@ class BotHandlers:
                 "<b>Остановить Minecraft?</b>\nИгроков лучше предупредить заранее.",
                 reply_markup=confirmation_keyboard("stop"),
             )
+        elif command == "/players" or key == BTN_PLAYERS.casefold():
+            self.telegram.send_message(chat_id, self.minecraft.players_text(), reply_markup=main_menu())
+        elif command in ("/kill", "/kick"):
+            if len(text.split()) < 2:
+                self.telegram.send_message(
+                    chat_id,
+                    "<b>Использование:</b> /{} <ник> [причина]".format(command.lstrip("/")),
+                    reply_markup=main_menu(),
+                )
+                return
+            raw_command = text[1:]
+            self.minecraft.send_player_command(chat_id, raw_command)
         elif command == "/mc_restart" or key == BTN_RESTART.casefold():
             self.telegram.send_message(
                 chat_id,
@@ -91,8 +104,11 @@ def help_text():
         "Управление сервером теперь через кнопки ниже.\n\n"
         "<b>{}</b> - состояние systemd, ядра и порта\n"
         "<b>{}</b> - CPU, RAM и диск VPS\n"
+        "<b>{}</b> - список игроков на сервере\n"
         "<b>{}</b> - запуск с ожиданием строки Done\n"
         "<b>{}</b> - остановка с подтверждением\n"
         "<b>{}</b> - перезапуск с подтверждением\n"
-        "<b>{}</b> - отправить latest.log файлом"
-    ).format(BTN_STATUS, BTN_RESOURCES, BTN_START, BTN_STOP, BTN_RESTART, BTN_LOGS)
+        "<b>{}</b> - отправить latest.log файлом\n\n"
+        "<b>/kill <ник></b> - отправить команду kill на сервер\n"
+        "<b>/kick <ник> [причина]</b> - отправить команду kick на сервер"
+    ).format(BTN_STATUS, BTN_RESOURCES, BTN_PLAYERS, BTN_START, BTN_STOP, BTN_RESTART, BTN_LOGS)

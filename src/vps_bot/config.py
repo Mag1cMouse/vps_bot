@@ -14,6 +14,9 @@ class Settings:
     service: str
     log_file: str
     mc_port: int
+    rcon_host: str
+    rcon_port: int
+    rcon_password: str | None
     start_timeout: int
     stop_timeout: int
     max_log_mb: int
@@ -167,6 +170,9 @@ def load_settings(profile=None, env_file=None, project_root=None):
         service=values.get("MC_SERVICE", "minecraft.service"),
         log_file=_resolve_path(values.get("MC_LATEST_LOG", "/root/server/logs/latest.log"), root),
         mc_port=int(values.get("MC_PORT", "25565")),
+        rcon_host=values.get("MC_RCON_HOST", "127.0.0.1"),
+        rcon_port=int(values.get("MC_RCON_PORT", "25575")),
+        rcon_password=values.get("MC_RCON_PASSWORD"),
         start_timeout=int(values.get("MC_START_TIMEOUT", "180")),
         stop_timeout=int(values.get("MC_STOP_TIMEOUT", "180")),
         max_log_mb=int(values.get("MAX_LOG_SEND_MB", "45")),
