@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - master
+  pull_request:
+    branches:
+      - dev
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check project
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python files
+        run: python -m compileall bot.py src
+
+      - name: Smoke test dev profile
+        run: |
+          python -B - <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "src")
+          from vps_bot.config import load_settings
+
+          settings = load_settings(profile="dev", env_file=".env.dev.example", project_root=Path.cwd())
+          assert settings.profile == "dev"
+          assert settings.control_mode == "mock"
+          assert settings.token
+          print("dev profile ok")
+          PY
+
+      - name: Smoke test master profile
+        run: |
+          python -B - <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "src")
+          from vps_bot.config import load_settings
+
+          settings = load_settings(profile="master", env_file=".env.prod.example", project_root=Path.cwd())
+          assert settings.profile == "prod"
+          assert settings.control_mode == "systemd"
+          assert settings.token
+          print("prod profile ok")
+          PY
+
+  notify:
+    name: Notify Telegram
+    runs-on: ubuntu-latest
+    needs:
+      - check
+    if: always() && github.event_name == 'push'
+
+    env:
+      TELEGRAM_STATUS_BOT_TOKEN: ${{ secrets.TELEGRAM_STATUS_BOT_TOKEN }}
+      TELEGRAM_STATUS_CHAT_ID: ${{ secrets.TELEGRAM_STATUS_CHAT_ID }}
+      CHECK_RESULT: ${{ needs.check.result }}
+
+    steps:
+      - name: Send CI status
+        if: env.TELEGRAM_STATUS_BOT_TOKEN != '' && env.TELEGRAM_STATUS_CHAT_ID != ''
+        run: |
+          short_sha="${GITHUB_SHA:0:7}"
+          text="CI ${CHECK_RESULT}
+          repo: ${GITHUB_REPOSITORY}
+          branch: ${GITHUB_REF_NAME}
+          commit: ${short_sha}
+          run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          curl -sS \
+            --data-urlencode "chat_id=${TELEGRAM_STATUS_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            "https://api.telegram.org/bot${TELEGRAM_STATUS_BOT_TOKEN}/sendMessage"

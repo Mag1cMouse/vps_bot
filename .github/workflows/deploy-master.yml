@@ -1,0 +1,115 @@
+name: Deploy Master
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-master
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy master
+    runs-on: ubuntu-latest
+
+    env:
+      TELEGRAM_STATUS_BOT_TOKEN: ${{ secrets.TELEGRAM_STATUS_BOT_TOKEN }}
+      TELEGRAM_STATUS_CHAT_ID: ${{ secrets.TELEGRAM_STATUS_CHAT_ID }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_PROJECT_DIR: ${{ secrets.VPS_PROJECT_DIR }}
+      VPS_BOT_SERVICE: ${{ secrets.VPS_BOT_SERVICE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build check
+        run: python -m compileall bot.py src
+
+      - name: Smoke test prod profile
+        run: |
+          python -B - <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "src")
+          from vps_bot.config import load_settings
+
+          settings = load_settings(profile="prod", env_file=".env.prod.example", project_root=Path.cwd())
+          assert settings.profile == "prod"
+          assert settings.control_mode == "systemd"
+          print("prod profile ok")
+          PY
+
+      - name: Check deploy secrets
+        id: deploy_secrets
+        run: |
+          missing=""
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_PROJECT_DIR VPS_BOT_SERVICE; do
+            if [ -z "${!name}" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+
+          if [ -n "${missing}" ]; then
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+            echo "Deployment skipped. Missing secrets:${missing}"
+          else
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Configure SSH
+        if: steps.deploy_secrets.outputs.configured == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${VPS_SSH_KEY}" > ~/.ssh/vps_bot_deploy_key
+          chmod 600 ~/.ssh/vps_bot_deploy_key
+          ssh-keyscan -p "${VPS_PORT:-22}" "${VPS_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        if: steps.deploy_secrets.outputs.configured == 'true'
+        run: |
+          ssh -i ~/.ssh/vps_bot_deploy_key -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" \
+            "set -euo pipefail
+             cd \"${VPS_PROJECT_DIR}\"
+             git fetch origin master
+             git checkout master
+             git pull --ff-only origin master
+             python3 -m compileall bot.py src
+             sudo systemctl restart \"${VPS_BOT_SERVICE}\"
+             sudo systemctl status \"${VPS_BOT_SERVICE}\" --no-pager -l"
+
+      - name: Send deploy status
+        if: always() && env.TELEGRAM_STATUS_BOT_TOKEN != '' && env.TELEGRAM_STATUS_CHAT_ID != ''
+        run: |
+          short_sha="${GITHUB_SHA:0:7}"
+          result="${{ job.status }}"
+          if [ "${result}" = "success" ] && [ "${{ steps.deploy_secrets.outputs.configured }}" != "true" ]; then
+            result="skipped: deploy secrets are not configured"
+          fi
+
+          text="Deploy master ${result}
+          repo: ${GITHUB_REPOSITORY}
+          branch: ${GITHUB_REF_NAME}
+          commit: ${short_sha}
+          run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          curl -sS \
+            --data-urlencode "chat_id=${TELEGRAM_STATUS_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            "https://api.telegram.org/bot${TELEGRAM_STATUS_BOT_TOKEN}/sendMessage"

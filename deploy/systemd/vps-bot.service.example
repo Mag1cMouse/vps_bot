@@ -1,0 +1,16 @@
+[Unit]
+Description=VPS Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vps_bot
+Environment=BOT_PROFILE=prod
+EnvironmentFile=/opt/vps_bot/.env.prod
+ExecStart=/usr/bin/python3 /opt/vps_bot/bot.py --profile prod
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
