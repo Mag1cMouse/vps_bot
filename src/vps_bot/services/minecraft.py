@@ -4,8 +4,10 @@ import re
 import shutil
 import socket
 import struct
+import tarfile
 import time
 from datetime import datetime
+from pathlib import Path
 
 from vps_bot.services.logs import ready_line
 from vps_bot.services.systemd import run_command
@@ -27,12 +29,18 @@ class MinecraftService:
         self.systemd = systemd
         self.log = log
         self.log_offset = 0
+        self.last_health_check = 0
+        self.health_snapshot = None
         self.rcon_host = settings.rcon_host
         self.rcon_port = settings.rcon_port
         self.rcon_password = settings.rcon_password
 
     def initialize_log_offset(self):
         self.log_offset = self.log.size() if self.log.exists() else 0
+
+    def initialize_health_state(self):
+        self.health_snapshot = self._health_snapshot()
+        self.last_health_check = time.monotonic()
 
     def status_text(self):
         active, state = self.systemd.is_active()
@@ -289,7 +297,55 @@ class MinecraftService:
         for event in self._parse_log_events(new_text):
             self._notify_player_event(event, player_state)
 
+    def check_health_events(self):
+        if getattr(self.systemd, "is_mock", False):
+            return
+
+        now = time.monotonic()
+        if now - self.last_health_check < self.settings.monitor_interval:
+            return
+
+        previous = self.health_snapshot
+        current = self._health_snapshot()
+        self.health_snapshot = current
+        self.last_health_check = now
+
+        if not previous:
+            return
+
+        if previous["active"] and not current["active"]:
+            self._notify_admins(
+                "<b>Minecraft остановился</b>\n"
+                "Systemd state: <code>{}</code>\n"
+                "Последний journal:\n<pre>{}</pre>".format(
+                    html.escape(current["state"]),
+                    html.escape(self.systemd.journal_tail()[-1800:]),
+                )
+            )
+        elif not previous["active"] and current["active"]:
+            self._notify_admins(
+                "<b>Minecraft снова запущен</b>\n"
+                "PID: <code>{}</code>".format(html.escape(current.get("pid") or "unknown"))
+            )
+
+        if current["active"] and previous.get("port") is True and current.get("port") is False:
+            self._notify_admins("<b>Порт Minecraft перестал слушаться</b>\nПорт: <code>{}</code>".format(self.settings.mc_port))
+        elif current["active"] and previous.get("port") is False and current.get("port") is True:
+            self._notify_admins("<b>Порт Minecraft снова слушается</b>\nПорт: <code>{}</code>".format(self.settings.mc_port))
+
+        if previous.get("restarts") and current.get("restarts") and previous["restarts"] != current["restarts"]:
+            self._notify_admins(
+                "<b>Systemd заметил рестарт Minecraft</b>\n"
+                "NRestarts: <code>{} -> {}</code>".format(
+                    html.escape(previous["restarts"]),
+                    html.escape(current["restarts"]),
+                )
+            )
+
     def send_player_command(self, chat_id, raw_command):
+        return self.send_rcon_command(chat_id, raw_command, title="Команда")
+
+    def send_rcon_command(self, chat_id, raw_command, title="Команда"):
         raw_command = raw_command.lstrip("/")
         if getattr(self.systemd, "is_mock", False):
             self.telegram.send_message(
@@ -306,16 +362,96 @@ class MinecraftService:
             return
 
         try:
+            print("RCON command:", raw_command, flush=True)
             response = self._send_rcon_command(raw_command)
             if not response:
                 response = "Команда отправлена."
             response = strip_minecraft_formatting(response)
             self.telegram.send_message(
                 chat_id,
-                "<b>Команда:</b> <code>{}</code>\n\n<pre>{}</pre>".format(html.escape(raw_command), html.escape(response[-2500:])),
+                "<b>{}:</b> <code>{}</code>\n\n<pre>{}</pre>".format(
+                    html.escape(title),
+                    html.escape(raw_command),
+                    html.escape(response[-2500:]),
+                ),
             )
         except Exception as exc:
             self.telegram.send_message(chat_id, fail_text("Не удалось отправить команду", str(exc)))
+
+    def backup(self, chat_id):
+        if getattr(self.systemd, "is_mock", False):
+            self.telegram.send_message(
+                chat_id,
+                "<b>DEV: бэкап сымитирован.</b>\nФайлы мира не архивировались, RCON-команды не выполнялись.",
+            )
+            return
+
+        if not self.rcon_password:
+            self.telegram.send_message(
+                chat_id,
+                "<b>Бэкап невозможен: RCON не настроен.</b>\n"
+                "Нужны MC_RCON_HOST, MC_RCON_PORT и MC_RCON_PASSWORD, чтобы безопасно выполнить save-off/save-all/save-on.",
+            )
+            return
+
+        paths = [Path(path) for path in self.settings.backup_paths if Path(path).exists()]
+        missing = [path for path in self.settings.backup_paths if not Path(path).exists()]
+        if not paths:
+            self.telegram.send_message(
+                chat_id,
+                "<b>Бэкап невозможен: пути мира не найдены.</b>\n<pre>{}</pre>".format(
+                    html.escape("\n".join(self.settings.backup_paths))
+                ),
+            )
+            return
+
+        started = datetime.now()
+        backup_dir = Path(self.settings.backup_dir)
+        archive_name = "minecraft-backup-{}.tar.gz".format(started.strftime("%Y%m%d-%H%M%S"))
+        archive_path = backup_dir / archive_name
+
+        message = self.telegram.send_message(
+            chat_id,
+            "<b>Бэкап Minecraft</b>\n"
+            "Запускаю save-off и save-all flush.\n"
+            "Папка: <code>{}</code>".format(html.escape(str(backup_dir))),
+        )
+
+        save_disabled = False
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            self._send_rcon_command("save-off")
+            save_disabled = True
+            self._send_rcon_command("save-all flush")
+
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for path in paths:
+                    archive.add(str(path), arcname=path.name)
+
+            self._cleanup_old_backups(backup_dir)
+            size_mb = archive_path.stat().st_size / 1024**2
+            elapsed = int((datetime.now() - started).total_seconds())
+
+            extra = ""
+            if missing:
+                extra = "\n\nНе найдены и пропущены:\n<pre>{}</pre>".format(html.escape("\n".join(missing)))
+
+            self.telegram.edit_message(
+                chat_id,
+                message["message_id"],
+                "<b>Бэкап готов.</b>\n"
+                "Файл: <code>{}</code>\n"
+                "Размер: <code>{:.1f} MB</code>\n"
+                "Время: <code>{} сек.</code>{}".format(html.escape(str(archive_path)), size_mb, elapsed, extra),
+            )
+        except Exception as exc:
+            self.telegram.edit_message(chat_id, message["message_id"], fail_text("Бэкап не выполнен", str(exc)))
+        finally:
+            if save_disabled:
+                try:
+                    self._send_rcon_command("save-on")
+                except Exception as exc:
+                    self.telegram.send_message(chat_id, fail_text("Не удалось вернуть save-on", str(exc)))
 
     def player_state(self, text=None):
         if text is None:
@@ -367,6 +503,10 @@ class MinecraftService:
         for admin_id in self.settings.admin_ids:
             self.telegram.send_message(admin_id, text)
 
+    def _notify_admins(self, text):
+        for admin_id in self.settings.admin_ids:
+            self.telegram.send_message(admin_id, text)
+
     def _rebuild_players_from_lines(self, lines):
         players = []
         for line in lines:
@@ -411,6 +551,34 @@ class MinecraftService:
 
         players = parse_player_list(match.group(3))
         return {"count": int(match.group(1)), "players": players}
+
+    def _health_snapshot(self):
+        active, state = self.systemd.is_active()
+        info = self.systemd.show_info()
+        port = self.port_listening() if active else None
+        return {
+            "active": active,
+            "state": state,
+            "port": port,
+            "pid": info.get("MainPID"),
+            "restarts": info.get("NRestarts"),
+        }
+
+    def _cleanup_old_backups(self, backup_dir):
+        keep = max(0, self.settings.backup_keep)
+        if keep == 0:
+            return
+
+        backups = sorted(
+            backup_dir.glob("minecraft-backup-*.tar.gz"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for old_backup in backups[keep:]:
+            try:
+                old_backup.unlink()
+            except OSError as exc:
+                print("Backup cleanup failed:", old_backup, repr(exc), flush=True)
 
     def _send_rcon_command(self, command):
         def recv_exact(sock, size):

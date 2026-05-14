@@ -2,7 +2,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import FrozenSet
+from typing import FrozenSet, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,11 @@ class Settings:
     mc_port: int
     rcon_host: str
     rcon_port: int
-    rcon_password: str | None
+    rcon_password: Optional[str]
+    backup_paths: Tuple[str, ...]
+    backup_dir: str
+    backup_keep: int
+    monitor_interval: int
     start_timeout: int
     stop_timeout: int
     max_log_mb: int
@@ -111,6 +115,10 @@ def _resolve_path(value, project_root):
     return str((project_root / path).resolve())
 
 
+def _resolve_paths(value, project_root):
+    return tuple(_resolve_path(item.strip(), project_root) for item in value.split(",") if item.strip())
+
+
 def _load_profile_env(profile, env_file, project_root):
     if env_file:
         path = Path(env_file).expanduser()
@@ -173,6 +181,10 @@ def load_settings(profile=None, env_file=None, project_root=None):
         rcon_host=values.get("MC_RCON_HOST", "127.0.0.1"),
         rcon_port=int(values.get("MC_RCON_PORT", "25575")),
         rcon_password=values.get("MC_RCON_PASSWORD"),
+        backup_paths=_resolve_paths(values.get("MC_BACKUP_PATHS", "/root/server/world"), root),
+        backup_dir=_resolve_path(values.get("MC_BACKUP_DIR", "backups"), root),
+        backup_keep=int(values.get("MC_BACKUP_KEEP", "5")),
+        monitor_interval=int(values.get("MC_MONITOR_INTERVAL", "30")),
         start_timeout=int(values.get("MC_START_TIMEOUT", "180")),
         stop_timeout=int(values.get("MC_STOP_TIMEOUT", "180")),
         max_log_mb=int(values.get("MAX_LOG_SEND_MB", "45")),

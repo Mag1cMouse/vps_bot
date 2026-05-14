@@ -40,6 +40,9 @@ jobs:
       - name: Build check
         run: python -m compileall bot.py src
 
+      - name: Run tests
+        run: python -m unittest discover -s tests
+
       - name: Smoke test prod profile
         run: |
           python -B - <<'PY'
@@ -53,6 +56,30 @@ jobs:
           assert settings.profile == "prod"
           assert settings.control_mode == "systemd"
           print("prod profile ok")
+          PY
+
+      - name: Write build info
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+
+          data = {
+              "branch": os.environ["GITHUB_REF_NAME"],
+              "sha": os.environ["GITHUB_SHA"],
+              "built_at": datetime.now(timezone.utc).isoformat(),
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_url": "{}/{}/actions/runs/{}".format(
+                  os.environ["GITHUB_SERVER_URL"],
+                  os.environ["GITHUB_REPOSITORY"],
+                  os.environ["GITHUB_RUN_ID"],
+              ),
+          }
+
+          with open("BUILD_INFO.json", "w", encoding="utf-8") as file:
+              json.dump(data, file, ensure_ascii=False, indent=2)
+              file.write("\n")
           PY
 
       - name: Check deploy secrets
@@ -99,6 +126,7 @@ jobs:
             --exclude ".env.*" \
             --exclude "__pycache__/" \
             --exclude "*.pyc" \
+            --exclude "backups/" \
             --exclude ".venv/" \
             --exclude "venv/" \
             ./ "${VPS_USER}@${VPS_HOST}:${VPS_PROJECT_DIR}/"

@@ -19,6 +19,10 @@
 - fallback-реконструкция игроков по `latest.log`, если RCON недоступен;
 - получать уведомления о входе/выходе игроков по `latest.log`;
 - отправлять `/kill` и `/kick` через RCON, если RCON настроен.
+- отправлять `/say`, `/cmd`, `/whitelist_*` и `/tps` через RCON;
+- делать `/backup` мира через `save-off`, `save-all flush`, архивирование и `save-on`;
+- показывать `/version` по `BUILD_INFO.json`;
+- мониторить падение Minecraft, состояние порта и systemd restarts.
 
 ## Текущий технологический стек
 
@@ -43,6 +47,7 @@ src/vps_bot/
     keyboards.py
   services/
     __init__.py
+    build_info.py
     logs.py
     minecraft.py
     resources.py
@@ -62,6 +67,9 @@ scripts/
 .env.prod.example
 README.md
 pyproject.toml
+tests/
+  test_config.py
+  test_minecraft.py
 ```
 
 В рабочей папке могут появляться `__pycache__` и `.pyc` после проверок Python. Они не являются частью логики проекта.
@@ -88,8 +96,10 @@ python3 bot.py
 - создаёт `MinecraftService`;
 - создаёт `BotHandlers`;
 - на старте вызывает `deleteWebhook`, `setMyCommands`, `initialize_log_offset`;
+- на старте инициализирует health snapshot для мониторинга;
 - запускает бесконечный polling-loop через `getUpdates`;
 - после обработки пачки updates вызывает `minecraft.process_log_events()`.
+- после обработки пачки updates вызывает `minecraft.check_health_events()`.
 
 Поддерживает CLI-флаги:
 
@@ -122,6 +132,10 @@ MC_PORT
 MC_RCON_HOST
 MC_RCON_PORT
 MC_RCON_PASSWORD
+MC_BACKUP_PATHS
+MC_BACKUP_DIR
+MC_BACKUP_KEEP
+MC_MONITOR_INTERVAL
 MC_START_TIMEOUT
 MC_STOP_TIMEOUT
 MAX_LOG_SEND_MB
@@ -143,10 +157,18 @@ MAX_LOG_SEND_MB
 /status
 /resources
 /players
+/tps
+/backup
+/version
 /mc_start
 /mc_stop
 /mc_restart
 /logs
+/say <текст>
+/cmd <команда Minecraft>
+/whitelist_add <ник>
+/whitelist_remove <ник>
+/whitelist_list
 /kill <ник>
 /kick <ник> [причина]
 ```
@@ -207,6 +229,12 @@ MAX_LOG_SEND_MB
 
 Сделан кроссплатформенным, чтобы локальный dev на Windows не падал.
 
+### `src/vps_bot/services/build_info.py`
+
+Читает `BUILD_INFO.json` из корня проекта и формирует HTML-ответ для `/version`.
+
+Если `BUILD_INFO.json` отсутствует, пытается взять branch/commit из локального git. На VPS `.git` не деплоится, поэтому нормальный источник версии на сервере - именно `BUILD_INFO.json`, который пишет GitHub Actions перед `rsync`.
+
 ### `src/vps_bot/services/minecraft.py`
 
 Основная бизнес-логика Minecraft:
@@ -223,6 +251,10 @@ MAX_LOG_SEND_MB
 - уведомления админам о входе/выходе игроков;
 - отправка `/kill` и `/kick` через RCON;
 - очистка RCON-ответов от Minecraft color/format codes вида `§6`, `§c`, `§r` перед отправкой в Telegram.
+- отправка `/say`, `/cmd`, `/whitelist_add`, `/whitelist_remove`, `/whitelist_list`, `/tps` через RCON;
+- `/backup`: требует RCON, выполняет `save-off`, `save-all flush`, архивирует `MC_BACKUP_PATHS` в `MC_BACKUP_DIR`, затем всегда пытается вернуть `save-on`;
+- cleanup старых backup-архивов по `MC_BACKUP_KEEP`;
+- мониторинг Minecraft: active/inactive, порт `MC_PORT`, `NRestarts` из systemd.
 
 RCON используется только если задан `MC_RCON_PASSWORD`.
 
@@ -241,6 +273,7 @@ CI для `dev` и `master`:
 - запускается на `push`, `pull_request` и вручную через `workflow_dispatch`;
 - ставит Python 3.12;
 - выполняет `python -m compileall bot.py src`;
+- выполняет `python -m unittest discover -s tests`;
 - smoke-test для dev profile;
 - smoke-test для master/prod profile;
 - отправляет Telegram-уведомление на `push` и `workflow_dispatch`, если заданы secrets `TELEGRAM_STATUS_BOT_TOKEN` и `TELEGRAM_STATUS_CHAT_ID`; на `pull_request` уведомление не отправляется.
@@ -252,13 +285,15 @@ CI для `dev` и `master`:
 
 - запускается на push в `master` и вручную через `workflow_dispatch`;
 - проверяет Python-код;
+- запускает unit-тесты;
 - проверяет prod profile;
+- пишет `BUILD_INFO.json`;
 - проверяет наличие deploy secrets;
 - настраивает SSH-ключ;
 - ставит `rsync`;
 - создаёт `VPS_PROJECT_DIR` на сервере;
 - отправляет код через `rsync`;
-- исключает `.git`, `.github`, `.env`, `.env.*`, `__pycache__`, `.pyc`, `.venv`, `venv`;
+- исключает `.git`, `.github`, `.env`, `.env.*`, `__pycache__`, `.pyc`, `backups/`, `.venv`, `venv`;
 - на VPS выполняет `python3 -m compileall bot.py src`;
 - выставляет владельца проекта `mcbot:mcbot`;
 - перезапускает systemd-сервис Telegram-бота из `VPS_BOT_SERVICE`;
@@ -523,6 +558,12 @@ ls -la /root/server/logs/latest.log
 
 ```bash
 python -m compileall bot.py src
+```
+
+Запустить тесты:
+
+```bash
+python -m unittest discover -s tests
 ```
 
 Проверить dev profile:
