@@ -50,6 +50,8 @@ src/vps_bot/
 .github/workflows/
   ci.yml
   deploy-master.yml
+.github/scripts/
+  notify_telegram.py
 deploy/systemd/
   vps-bot.service.example
 scripts/
@@ -217,6 +219,7 @@ MAX_LOG_SEND_MB
 - получение списка игроков через RCON `list`, если задан `MC_RCON_PASSWORD`;
 - fallback-реконструкция состояния игроков по join/login/leave/kick/lost connection строкам в `latest.log`;
 - устойчивый разбор разных форматов лог-префикса, включая `[time INFO]: ...` и Forge/Arclight-формат с несколькими `[...]` перед сообщением;
+- дедупликация выхода игрока: пара `lost connection` + `left the game` считается одним leave-событием;
 - уведомления админам о входе/выходе игроков;
 - отправка `/kill` и `/kick` через RCON.
 
@@ -234,12 +237,13 @@ rcon.password=...
 
 CI для `dev` и `master`:
 
-- запускается на `push` и `pull_request`;
+- запускается на `push`, `pull_request` и вручную через `workflow_dispatch`;
 - ставит Python 3.12;
 - выполняет `python -m compileall bot.py src`;
 - smoke-test для dev profile;
 - smoke-test для master/prod profile;
-- на push отправляет Telegram-уведомление, если заданы secrets `TELEGRAM_STATUS_BOT_TOKEN` и `TELEGRAM_STATUS_CHAT_ID`.
+- отправляет Telegram-уведомление на `push` и `workflow_dispatch`, если заданы secrets `TELEGRAM_STATUS_BOT_TOKEN` и `TELEGRAM_STATUS_CHAT_ID`; на `pull_request` уведомление не отправляется.
+- уведомления отправляются через `.github/scripts/notify_telegram.py`; если secrets пустые, в Actions будет warning, если Telegram API вернул `ok:false`, job упадёт с ошибкой.
 
 ### `.github/workflows/deploy-master.yml`
 
@@ -258,6 +262,25 @@ CI для `dev` и `master`:
 - выставляет владельца проекта `mcbot:mcbot`;
 - перезапускает systemd-сервис Telegram-бота из `VPS_BOT_SERVICE`;
 - отправляет Telegram-уведомление о результате деплоя.
+- уведомления отправляются через `.github/scripts/notify_telegram.py`; если Telegram API вернул `ok:false`, job упадёт с ошибкой.
+
+### `.github/scripts/notify_telegram.py`
+
+Общий скрипт отправки Telegram-уведомлений из GitHub Actions.
+
+Читает env:
+
+```text
+TELEGRAM_STATUS_BOT_TOKEN
+TELEGRAM_STATUS_CHAT_ID
+TELEGRAM_MESSAGE
+```
+
+Поведение:
+
+- если токен или chat_id пустые, пишет GitHub Actions warning и завершает шаг успешно;
+- если `TELEGRAM_MESSAGE` пустой, завершает шаг ошибкой;
+- если Telegram API вернул `ok:false`, завершает шаг ошибкой и печатает ответ API.
 
 Важно: `.env.prod` не деплоится и не затирается. В текущем VPS unit используется не `.env.prod`, а `/etc/minecraft-bot.env`.
 
