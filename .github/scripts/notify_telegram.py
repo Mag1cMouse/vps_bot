@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from urllib.error import HTTPError
 import urllib.parse
 import urllib.request
 
@@ -24,6 +25,10 @@ def main():
     try:
         with urllib.request.urlopen(url, data=body, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        print("::error::Telegram notification request failed: HTTP {} {}".format(exc.code, details))
+        return 1
     except Exception as exc:
         print("::error::Telegram notification request failed: {}".format(exc))
         return 1

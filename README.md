@@ -77,6 +77,10 @@ MC_LATEST_LOG=/root/server/logs/latest.log
 MC_RCON_HOST=127.0.0.1
 MC_RCON_PORT=25575
 MC_RCON_PASSWORD=ваш_пароль
+MC_BACKUP_PATHS=/root/server/world,/root/server/world_nether,/root/server/world_the_end
+MC_BACKUP_DIR=backups
+MC_BACKUP_KEEP=5
+MC_MONITOR_INTERVAL=30
 ```
 
 Пример systemd unit лежит в `deploy/systemd/vps-bot.service.example`.
@@ -88,6 +92,13 @@ MC_RCON_PASSWORD=ваш_пароль
 ```text
 .github/workflows/ci.yml             # автопроверка dev и master
 .github/workflows/deploy-master.yml  # проверка и деплой master на VPS
+```
+
+CI запускает:
+
+```bash
+python -m compileall bot.py src
+python -m unittest discover -s tests
 ```
 
 Для Telegram-уведомлений о статусе CI/CD добавь в GitHub repository secrets:
@@ -126,9 +137,9 @@ gh secret set VPS_BOT_SERVICE
 gh secret set VPS_SSH_KEY < ~/.ssh/vps_bot_deploy
 ```
 
-Деплой `master` работает через SSH + `rsync`: GitHub Actions отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python, выставляет владельца `mcbot:mcbot` и перезапускает systemd-сервис.
+Деплой `master` работает через SSH + `rsync`: GitHub Actions записывает `BUILD_INFO.json`, отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python, выставляет владельца `mcbot:mcbot` и перезапускает systemd-сервис.
 
-Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__` и виртуальные окружения при деплое не отправляются и не затираются. На текущем VPS боевой env-файл подключён в systemd unit как `/etc/minecraft-bot.env`.
+Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__`, `backups/` и виртуальные окружения при деплое не отправляются и не затираются. На текущем VPS боевой env-файл подключён в systemd unit как `/etc/minecraft-bot.env`.
 
 Для перезапуска сервиса GitHub Actions вызывает:
 
@@ -159,3 +170,47 @@ deploy/systemd/                # пример systemd unit для бота
 Логика реакции на сообщения находится в `src/vps_bot/handlers.py`.
 
 Работу с внешними системами лучше держать в `src/vps_bot/services/`, чтобы обработчики оставались короткими и понятными.
+
+## Команды бота
+
+Кнопки:
+
+```text
+Статус
+Ресурсы
+Игроки
+TPS
+Бэкап
+Логи файлом
+Запустить
+Остановить
+Перезапустить
+Версия
+Помощь
+```
+
+Slash-команды:
+
+```text
+/status
+/resources
+/players
+/tps
+/backup
+/version
+/logs
+/mc_start
+/mc_stop
+/mc_restart
+/say <текст>
+/cmd <команда Minecraft>
+/whitelist_add <ник>
+/whitelist_remove <ник>
+/whitelist_list
+/kill <ник>
+/kick <ник> [причина]
+```
+
+`/backup` требует настроенный RCON, потому что перед архивированием выполняет `save-off`, `save-all flush`, а затем `save-on`.
+
+Мониторинг сервера работает внутри polling-loop и отправляет админам уведомления, если Minecraft-сервис остановился, снова запустился, порт перестал слушаться или systemd изменил счётчик рестартов.

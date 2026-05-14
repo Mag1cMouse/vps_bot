@@ -1,5 +1,7 @@
+from vps_bot.services.build_info import build_info_text
 from vps_bot.services.resources import resources_text
 from vps_bot.telegram.keyboards import (
+    BTN_BACKUP,
     BTN_HELP,
     BTN_LOGS,
     BTN_PLAYERS,
@@ -8,6 +10,8 @@ from vps_bot.telegram.keyboards import (
     BTN_START,
     BTN_STATUS,
     BTN_STOP,
+    BTN_TPS,
+    BTN_VERSION,
     confirmation_keyboard,
     main_menu,
 )
@@ -56,6 +60,37 @@ class BotHandlers:
             )
         elif command == "/players" or key == BTN_PLAYERS.casefold():
             self.telegram.send_message(chat_id, self.minecraft.players_text(), reply_markup=main_menu())
+        elif command == "/tps" or key == BTN_TPS.casefold():
+            self.minecraft.send_rcon_command(chat_id, "tps", title="TPS")
+        elif command == "/backup" or key == BTN_BACKUP.casefold():
+            self.minecraft.backup(chat_id)
+        elif command == "/version" or key == BTN_VERSION.casefold():
+            self.telegram.send_message(chat_id, build_info_text(self.settings.project_root), reply_markup=main_menu())
+        elif command == "/say":
+            argument = command_argument(text)
+            if not argument:
+                self.telegram.send_message(chat_id, "<b>Использование:</b> /say <текст>", reply_markup=main_menu())
+                return
+            self.minecraft.send_rcon_command(chat_id, "say {}".format(argument), title="Say")
+        elif command == "/cmd":
+            argument = command_argument(text)
+            if not argument:
+                self.telegram.send_message(chat_id, "<b>Использование:</b> /cmd <команда Minecraft>", reply_markup=main_menu())
+                return
+            self.minecraft.send_rcon_command(chat_id, argument, title="RCON")
+        elif command in ("/whitelist_add", "/whitelist_remove"):
+            argument = command_argument(text)
+            if not argument:
+                self.telegram.send_message(
+                    chat_id,
+                    "<b>Использование:</b> /{} <ник>".format(command.lstrip("/")),
+                    reply_markup=main_menu(),
+                )
+                return
+            action = "add" if command == "/whitelist_add" else "remove"
+            self.minecraft.send_rcon_command(chat_id, "whitelist {} {}".format(action, argument), title="Whitelist")
+        elif command == "/whitelist_list":
+            self.minecraft.send_rcon_command(chat_id, "whitelist list", title="Whitelist")
         elif command in ("/kill", "/kick"):
             if len(text.split()) < 2:
                 self.telegram.send_message(
@@ -105,10 +140,36 @@ def help_text():
         "<b>{}</b> - состояние systemd, ядра и порта\n"
         "<b>{}</b> - CPU, RAM и диск VPS\n"
         "<b>{}</b> - список игроков на сервере\n"
+        "<b>{}</b> - TPS/MSPT через RCON\n"
+        "<b>{}</b> - бэкап мира\n"
+        "<b>{}</b> - текущий build/commit\n"
         "<b>{}</b> - запуск с ожиданием строки Done\n"
         "<b>{}</b> - остановка с подтверждением\n"
         "<b>{}</b> - перезапуск с подтверждением\n"
         "<b>{}</b> - отправить latest.log файлом\n\n"
+        "<b>/say <текст></b> - написать в чат Minecraft\n"
+        "<b>/cmd <команда></b> - выполнить RCON-команду\n"
+        "<b>/whitelist_add <ник></b> - добавить игрока в whitelist\n"
+        "<b>/whitelist_remove <ник></b> - удалить игрока из whitelist\n"
+        "<b>/whitelist_list</b> - показать whitelist\n"
         "<b>/kill <ник></b> - отправить команду kill на сервер\n"
         "<b>/kick <ник> [причина]</b> - отправить команду kick на сервер"
-    ).format(BTN_STATUS, BTN_RESOURCES, BTN_PLAYERS, BTN_START, BTN_STOP, BTN_RESTART, BTN_LOGS)
+    ).format(
+        BTN_STATUS,
+        BTN_RESOURCES,
+        BTN_PLAYERS,
+        BTN_TPS,
+        BTN_BACKUP,
+        BTN_VERSION,
+        BTN_START,
+        BTN_STOP,
+        BTN_RESTART,
+        BTN_LOGS,
+    )
+
+
+def command_argument(text):
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip()

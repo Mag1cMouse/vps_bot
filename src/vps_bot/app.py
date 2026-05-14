@@ -36,6 +36,7 @@ class BotApp:
     def run_forever(self):
         self.configure_telegram()
         self.minecraft.initialize_log_offset()
+        self.minecraft.initialize_health_state()
         print("Bot started", flush=True)
 
         offset = 0
@@ -55,6 +56,7 @@ class BotApp:
                         print("Update error:", repr(exc), flush=True)
 
                 self.minecraft.process_log_events()
+                self.minecraft.check_health_events()
             except Exception as exc:
                 print("Loop error:", repr(exc), flush=True)
                 time.sleep(5)

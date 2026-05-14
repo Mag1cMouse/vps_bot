@@ -35,6 +35,9 @@ jobs:
       - name: Compile Python files
         run: python -m compileall bot.py src
 
+      - name: Run tests
+        run: python -m unittest discover -s tests
+
       - name: Smoke test dev profile
         run: |
           python -B - <<'PY'
