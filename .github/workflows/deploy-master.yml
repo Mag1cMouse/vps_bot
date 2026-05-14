@@ -107,6 +107,7 @@ jobs:
             "set -euo pipefail
              cd \"${VPS_PROJECT_DIR}\"
              python3 -m compileall bot.py src
+             sudo chown -R mcbot:mcbot \"${VPS_PROJECT_DIR}\"
              sudo systemctl restart \"${VPS_BOT_SERVICE}\"
              sudo systemctl status \"${VPS_BOT_SERVICE}\" --no-pager -l"
 

@@ -126,9 +126,9 @@ gh secret set VPS_BOT_SERVICE
 gh secret set VPS_SSH_KEY < ~/.ssh/vps_bot_deploy
 ```
 
-Деплой `master` работает через SSH + `rsync`: GitHub Actions отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python и перезапускает systemd-сервис.
+Деплой `master` работает через SSH + `rsync`: GitHub Actions отправляет проверенную версию файлов в `VPS_PROJECT_DIR`, затем запускает проверку Python, выставляет владельца `mcbot:mcbot` и перезапускает systemd-сервис.
 
-Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__` и виртуальные окружения при деплое не отправляются и не затираются. Боевой `.env.prod` должен лежать на VPS внутри `VPS_PROJECT_DIR`.
+Файлы `.env`, `.env.*`, `.git`, `.github`, `__pycache__` и виртуальные окружения при деплое не отправляются и не затираются. На текущем VPS боевой env-файл подключён в systemd unit как `/etc/minecraft-bot.env`.
 
 Для перезапуска сервиса GitHub Actions вызывает:
 
