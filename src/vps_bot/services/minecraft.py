@@ -17,6 +17,7 @@ LEAVE_RE = re.compile(r"^(.+?) left the game$")
 LOST_RE = re.compile(r"^(.+?) lost connection.*$")
 KICK_RE = re.compile(r"^(.+?) was kicked from the game(?:: .*)?$")
 LIST_RE = re.compile(r"^There are (\d+) of a max(?: of)? (\d+) players online(?:: ?(.*))?$")
+MC_FORMAT_RE = re.compile(r"(?i)§[0-9A-FK-OR]")
 
 
 class MinecraftService:
@@ -308,6 +309,7 @@ class MinecraftService:
             response = self._send_rcon_command(raw_command)
             if not response:
                 response = "Команда отправлена."
+            response = strip_minecraft_formatting(response)
             self.telegram.send_message(
                 chat_id,
                 "<b>Команда:</b> <code>{}</code>\n\n<pre>{}</pre>".format(html.escape(raw_command), html.escape(response[-2500:])),
@@ -460,3 +462,7 @@ def parse_player_list(raw_players):
     if not raw_players:
         return []
     return [name.strip() for name in raw_players.split(",") if name.strip()]
+
+
+def strip_minecraft_formatting(text):
+    return MC_FORMAT_RE.sub("", text or "")
