@@ -9,6 +9,7 @@ on:
     branches:
       - dev
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -71,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - check
-    if: always() && github.event_name == 'push'
+    if: always() && github.event_name != 'pull_request'
 
     env:
       TELEGRAM_STATUS_BOT_TOKEN: ${{ secrets.TELEGRAM_STATUS_BOT_TOKEN }}
@@ -79,17 +80,16 @@ jobs:
       CHECK_RESULT: ${{ needs.check.result }}
 
     steps:
-      - name: Send CI status
-        if: env.TELEGRAM_STATUS_BOT_TOKEN != '' && env.TELEGRAM_STATUS_CHAT_ID != ''
-        run: |
-          short_sha="${GITHUB_SHA:0:7}"
-          text="CI ${CHECK_RESULT}
-          repo: ${GITHUB_REPOSITORY}
-          branch: ${GITHUB_REF_NAME}
-          commit: ${short_sha}
-          run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - name: Checkout notification script
+        uses: actions/checkout@v4
 
-          curl -sS \
-            --data-urlencode "chat_id=${TELEGRAM_STATUS_CHAT_ID}" \
-            --data-urlencode "text=${text}" \
-            "https://api.telegram.org/bot${TELEGRAM_STATUS_BOT_TOKEN}/sendMessage"
+      - name: Send CI status
+        env:
+          TELEGRAM_MESSAGE: |
+            CI ${{ needs.check.result }}
+            repo: ${{ github.repository }}
+            branch: ${{ github.ref_name }}
+            commit: ${{ github.sha }}
+            run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python .github/scripts/notify_telegram.py

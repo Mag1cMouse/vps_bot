@@ -112,21 +112,22 @@ jobs:
              sudo systemctl status \"${VPS_BOT_SERVICE}\" --no-pager -l"
 
       - name: Send deploy status
-        if: always() && env.TELEGRAM_STATUS_BOT_TOKEN != '' && env.TELEGRAM_STATUS_CHAT_ID != ''
+        if: always()
+        env:
+          DEPLOY_CONFIGURED: ${{ steps.deploy_secrets.outputs.configured }}
+          TELEGRAM_MESSAGE: |
+            Deploy master ${{ job.status }}
+            repo: ${{ github.repository }}
+            branch: ${{ github.ref_name }}
+            commit: ${{ github.sha }}
+            run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          short_sha="${GITHUB_SHA:0:7}"
-          result="${{ job.status }}"
-          if [ "${result}" = "success" ] && [ "${{ steps.deploy_secrets.outputs.configured }}" != "true" ]; then
-            result="skipped: deploy secrets are not configured"
-          fi
-
-          text="Deploy master ${result}
+          if [ "${DEPLOY_CONFIGURED}" != "true" ]; then
+            export TELEGRAM_MESSAGE="Deploy master skipped: deploy secrets are not configured
           repo: ${GITHUB_REPOSITORY}
           branch: ${GITHUB_REF_NAME}
-          commit: ${short_sha}
+          commit: ${GITHUB_SHA}
           run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
 
-          curl -sS \
-            --data-urlencode "chat_id=${TELEGRAM_STATUS_CHAT_ID}" \
-            --data-urlencode "text=${text}" \
-            "https://api.telegram.org/bot${TELEGRAM_STATUS_BOT_TOKEN}/sendMessage"
+          python .github/scripts/notify_telegram.py

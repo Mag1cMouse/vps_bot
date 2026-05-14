@@ -330,16 +330,21 @@ class MinecraftService:
 
     def _parse_log_events(self, text):
         events = []
+        pending_lost = {}
         for line in text.splitlines():
             message = log_message(line)
             if match := JOIN_RE.match(message):
+                pending_lost.pop(match.group(1), None)
                 events.append({"type": "join", "player": match.group(1)})
             elif match := LEAVE_RE.match(message):
+                pending_lost.pop(match.group(1), None)
                 events.append({"type": "leave", "player": match.group(1)})
             elif match := LOST_RE.match(message):
-                events.append({"type": "leave", "player": match.group(1)})
+                pending_lost[match.group(1)] = {"type": "leave", "player": match.group(1)}
             elif match := KICK_RE.match(message):
+                pending_lost.pop(match.group(1), None)
                 events.append({"type": "leave", "player": match.group(1)})
+        events.extend(pending_lost.values())
         return events
 
     def _notify_player_event(self, event, player_state):
