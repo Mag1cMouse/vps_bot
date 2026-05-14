@@ -11,11 +11,12 @@ from vps_bot.services.logs import ready_line
 from vps_bot.services.systemd import run_command
 from vps_bot.telegram.keyboards import BTN_LOGS
 
-JOIN_RE = re.compile(r"^\[[^\]]+\]: ([^:]+) joined the game$")
-LEAVE_RE = re.compile(r"^\[[^\]]+\]: ([^:]+) left the game$")
-LOST_RE = re.compile(r"^\[[^\]]+\]: ([^:]+) lost connection.*$")
-KICK_RE = re.compile(r"^\[[^\]]+\]: ([^:]+) was kicked from the game(?:\: .*)?$")
-LIST_RE = re.compile(r"^\[[^\]]+\]: There are (\d+) of a max (\d+) players online(?:\: (.*))?$")
+JOIN_RE = re.compile(r"^(.+?) joined the game$")
+LOGIN_RE = re.compile(r"^(.+?)\[/[^\]]+\] logged in with entity id .*$")
+LEAVE_RE = re.compile(r"^(.+?) left the game$")
+LOST_RE = re.compile(r"^(.+?) lost connection.*$")
+KICK_RE = re.compile(r"^(.+?) was kicked from the game(?:: .*)?$")
+LIST_RE = re.compile(r"^There are (\d+) of a max(?: of)? (\d+) players online(?:: ?(.*))?$")
 
 
 class MinecraftService:
@@ -315,35 +316,29 @@ class MinecraftService:
             self.telegram.send_message(chat_id, fail_text("Не удалось отправить команду", str(exc)))
 
     def player_state(self, text=None):
+        if text is None:
+            rcon_state = self._rcon_player_state()
+            if rcon_state is not None:
+                return rcon_state
+
         text = text or self.log.tail()
         if not text:
             return None
 
-        lines = text.splitlines()
-        for line in reversed(lines):
-            list_match = LIST_RE.match(line)
-            if list_match:
-                players = []
-                if list_match.group(3):
-                    players = [name.strip() for name in list_match.group(3).split(",") if name.strip()]
-                return {
-                    "count": int(list_match.group(1)),
-                    "players": players,
-                }
-
-        players = self._rebuild_players_from_lines(lines)
+        players = self._rebuild_players_from_lines(text.splitlines())
         return {"count": len(players), "players": players}
 
     def _parse_log_events(self, text):
         events = []
         for line in text.splitlines():
-            if match := JOIN_RE.match(line):
+            message = log_message(line)
+            if match := JOIN_RE.match(message):
                 events.append({"type": "join", "player": match.group(1)})
-            elif match := LEAVE_RE.match(line):
+            elif match := LEAVE_RE.match(message):
                 events.append({"type": "leave", "player": match.group(1)})
-            elif match := LOST_RE.match(line):
+            elif match := LOST_RE.match(message):
                 events.append({"type": "leave", "player": match.group(1)})
-            elif match := KICK_RE.match(line):
+            elif match := KICK_RE.match(message):
                 events.append({"type": "leave", "player": match.group(1)})
         return events
 
@@ -368,23 +363,47 @@ class MinecraftService:
     def _rebuild_players_from_lines(self, lines):
         players = []
         for line in lines:
-            if match := JOIN_RE.match(line):
+            message = log_message(line)
+            if match := LIST_RE.match(message):
+                players = parse_player_list(match.group(3))
+            elif match := JOIN_RE.match(message):
                 name = match.group(1)
                 if name not in players:
                     players.append(name)
-            elif match := LEAVE_RE.match(line):
+            elif match := LOGIN_RE.match(message):
+                name = match.group(1)
+                if name not in players:
+                    players.append(name)
+            elif match := LEAVE_RE.match(message):
                 name = match.group(1)
                 if name in players:
                     players.remove(name)
-            elif match := LOST_RE.match(line):
+            elif match := LOST_RE.match(message):
                 name = match.group(1)
                 if name in players:
                     players.remove(name)
-            elif match := KICK_RE.match(line):
+            elif match := KICK_RE.match(message):
                 name = match.group(1)
                 if name in players:
                     players.remove(name)
         return players
+
+    def _rcon_player_state(self):
+        if getattr(self.systemd, "is_mock", False) or not self.rcon_password:
+            return None
+
+        try:
+            response = self._send_rcon_command("list")
+        except Exception as exc:
+            print("RCON list failed:", repr(exc), flush=True)
+            return None
+
+        match = LIST_RE.search(response.strip())
+        if not match:
+            return None
+
+        players = parse_player_list(match.group(3))
+        return {"count": int(match.group(1)), "players": players}
 
     def _send_rcon_command(self, command):
         def recv_exact(sock, size):
@@ -401,7 +420,7 @@ class MinecraftService:
 
             def send_packet(packet_id, packet_type, payload):
                 payload_bytes = payload.encode("utf-8")
-                packet = struct.pack("<iii", len(payload_bytes) + 2, packet_id, packet_type) + payload_bytes + b"\x00\x00"
+                packet = struct.pack("<iii", len(payload_bytes) + 10, packet_id, packet_type) + payload_bytes + b"\x00\x00"
                 sock.sendall(packet)
 
                 length_bytes = recv_exact(sock, 4)
@@ -424,3 +443,15 @@ class MinecraftService:
 def fail_text(title, output):
     output = html.escape((output or "Нет вывода.")[-2500:])
     return "<b>{}</b>\n\n<pre>{}</pre>".format(html.escape(title), output)
+
+
+def log_message(line):
+    if "]: " in line:
+        return line.rsplit("]: ", 1)[1].strip()
+    return line.strip()
+
+
+def parse_player_list(raw_players):
+    if not raw_players:
+        return []
+    return [name.strip() for name in raw_players.split(",") if name.strip()]
